@@ -81,15 +81,11 @@
         };
         
         // --- Core Setup Variables ---
-        // 1. Configuration: Use environment variable, otherwise use fallback config.
         const firebaseConfig = typeof __firebase_config !== 'undefined' 
             ? JSON.parse(__firebase_config) 
             : hardcodedConfig;
 
-        // 2. App ID: Use environment variable, otherwise use project ID.
         const appId = typeof __app_id !== 'undefined' ? __app_id : firebaseConfig.projectId || 'default-app-id';
-        
-        // 3. Auth Token: Use environment variable, otherwise null.
         const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
         // =====================================================================
 
@@ -100,21 +96,22 @@
         let userId = null;
         let isAuthReady = false;
 
-        // DOM Elements
-        const configStatus = document.getElementById('config-status');
-        const userInfoText = document.getElementById('user-status-text');
-        const dataSection = document.getElementById('data-section');
-        const writeButton = document.getElementById('write-button');
-        const readButton = document.getElementById('read-button');
-        const dataDisplay = document.getElementById('data-display');
-        const messageBox = document.getElementById('message-box');
-        const appIdDisplay = document.getElementById('app-id-display');
-        const userIdDisplay = document.getElementById('user-id-display');
+        // DOM Elements (Initialized later in DOMContentLoaded)
+        let configStatus;
+        let userInfoText;
+        let dataSection;
+        let writeButton;
+        let readButton;
+        let dataDisplay;
+        let messageBox;
+        let appIdDisplay;
+        let userIdDisplay;
 
         // --- Utility Functions ---
 
         // Display status messages
         function displayMessage(msg, type = 'info') {
+            if (!messageBox) return; // Guard against running before DOM is ready
             messageBox.textContent = msg;
             messageBox.classList.remove('hidden', 'bg-red-100', 'border-red-400', 'text-red-800', 'bg-green-100', 'border-green-400', 'text-green-800', 'bg-yellow-100', 'border-yellow-400', 'text-yellow-800');
             
@@ -161,14 +158,11 @@
                 userInfoText.innerHTML = `<span class="text-red-600 font-bold">Authentication Failed:</span> ${error.message}.`;
                 dataSection.classList.add('hidden');
                 
-                // CRITICAL: Display specific error message for the API key problem
                 if (error.message.includes('api-key-not-valid')) {
                     configStatus.innerHTML = `<div class="p-4 rounded-xl config-error border-2 border-dashed">
                         <p class="text-xl mb-2">🛑 CONFIGURATION ERROR: Invalid API Key 🛑</p>
                         <p class="text-sm">
-                            The Web API Key used is incorrect. If you are running this locally, you **must** update the 
-                            <code class="font-mono bg-red-200 px-1 rounded">apiKey</code> in the <code class="font-mono bg-red-200 px-1 rounded">hardcodedConfig</code> 
-                            object with your **actual Firebase Web API Key**.
+                            The Web API Key used is incorrect. Please ensure the <code class="font-mono bg-red-200 px-1 rounded">apiKey</code> is correct.
                         </p>
                     </div>`;
                 } else {
@@ -270,9 +264,20 @@
             }
         }
 
-        // --- Main Initialization ---
+        // --- Main Initialization (Run when DOM is fully loaded) ---
+        document.addEventListener('DOMContentLoaded', function() {
+            // Map DOM elements now that they are guaranteed to exist
+            configStatus = document.getElementById('config-status');
+            userInfoText = document.getElementById('user-status-text');
+            dataSection = document.getElementById('data-section');
+            writeButton = document.getElementById('write-button');
+            readButton = document.getElementById('read-button');
+            dataDisplay = document.getElementById('data-display');
+            messageBox = document.getElementById('message-box');
+            appIdDisplay = document.getElementById('app-id-display');
+            userIdDisplay = document.getElementById('user-id-display');
 
-        window.onload = function() {
+
             // Final check for placeholders if running outside the canvas
             if (typeof __firebase_config === 'undefined' && firebaseConfig.apiKey === "YOUR_WEB_API_KEY_HERE") {
                 configStatus.innerHTML = `<div class="p-4 rounded-xl config-error border-2 border-dashed">
@@ -299,9 +304,13 @@
                 handleSignIn();
                 setupAuthStateListener();
 
-                // Add event listeners to buttons
-                writeButton.addEventListener('click', writeTestData);
-                readButton.addEventListener('click', readDataOnce);
+                // Add event listeners to buttons, only if they exist
+                if (writeButton) {
+                    writeButton.addEventListener('click', writeTestData);
+                }
+                if (readButton) {
+                    readButton.addEventListener('click', readDataOnce);
+                }
 
                 configStatus.innerHTML = `<div class="p-3 bg-green-100 border border-green-400 text-green-800 rounded-lg">
                     <span class="font-semibold">Config Success:</span> Firebase loaded using ${typeof __firebase_config !== 'undefined' ? 'Environment Variables' : 'Hardcoded Fallback'}.
@@ -317,7 +326,7 @@
                     </p>
                 </div>`;
             }
-        };
+        });
 
     </script>
 </body>
