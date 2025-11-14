@@ -1,0 +1,314 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API Key Manager (HTML/JS)</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Define Inter font family */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        /* Custom alert styling for configuration error */
+        .config-error {
+            background-color: #fee2e2; /* Red-100 */
+            border-color: #ef4444; /* Red-500 */
+            color: #b91c1c; /* Red-800 */
+            font-weight: bold;
+            text-align: center;
+        }
+    </style>
+</head>
+<body class="min-h-screen bg-gray-100 p-4 sm:p-8">
+
+    <div id="app" class="w-full max-w-lg mx-auto bg-white p-6 sm:p-8 rounded-2xl shadow-2xl border-t-4 border-indigo-500 space-y-6">
+        <h1 class="text-3xl font-extrabold text-gray-900 text-center">API Key Manager</h1>
+        <p class="text-sm text-center text-gray-500">Securely manage your client application API key via Firestore.</p>
+
+        <!-- Dynamic Content Area -->
+        <div id="content-area">
+            <div class="flex justify-center items-center h-48">
+                <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-500"></div>
+                <p class="ml-4 text-gray-600">Initializing Firebase...</p>
+            </div>
+        </div>
+        
+        <!-- Status Message Box -->
+        <div id="message-box" class="hidden mt-4 p-3 bg-yellow-100 border border-yellow-400 text-yellow-800 rounded-lg text-sm transition-all duration-300"></div>
+    </div>
+
+    <!-- Firebase SDK Imports -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, onSnapshot, serverTimestamp, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // =====================================================================
+        // 🚨 CRITICAL: REPLACE PLACEHOLDERS BELOW WITH YOUR ACTUAL FIREBASE CONFIG
+        // =====================================================================
+        const firebaseConfig = {
+            // !!! THIS MUST BE YOUR ACTUAL API KEY !!!
+            apiKey: "YOUR_API_KEY", 
+            authDomain: "YOUR_AUTH_DOMAIN", 
+            projectId: "YOUR_PROJECT_ID", 
+            storageBucket: "YOUR_STORAGE_BUCKET",
+            messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+            appId: "YOUR_APP_ID"
+        };
+        // =====================================================================
+
+        // Initialize Global Variables
+        let app;
+        let db;
+        let auth;
+        let userId = null;
+        let isAuthReady = false;
+
+        // Global variable definitions (or mock for local running)
+        // Note: We use the provided __app_id first, then fallback to config.projectId, then a default.
+        const appId = typeof __app_id !== 'undefined' ? __app_id : firebaseConfig.projectId || 'default-app-id';
+
+        const messageBox = document.getElementById('message-box');
+        const contentArea = document.getElementById('content-area');
+
+        // --- Utility Functions ---
+
+        // Display status messages to the user
+        function displayMessage(msg) {
+            messageBox.textContent = msg;
+            messageBox.classList.remove('hidden');
+            setTimeout(() => {
+                messageBox.classList.add('hidden');
+                messageBox.textContent = '';
+            }, 5000); // Hide message after 5 seconds
+        }
+
+        // Helper function to generate a simple UUID
+        function generateSimpleUUID() {
+            let dt = new Date().getTime();
+            const uuid = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                const r = (dt + Math.random() * 16) % 16 | 0;
+                dt = Math.floor(dt / 16);
+                return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+            });
+            return uuid;
+        }
+
+        // Function to generate a new key string
+        function generateKeyString() {
+            const randomSuffix = generateSimpleUUID().replace(/-/g, '').substring(0, 20).toUpperCase();
+            return `FL-PRO-${randomSuffix}`;
+        }
+        
+        // Function to save the new key to Firestore
+        async function generateAndSaveKey() {
+            if (!db || !userId) {
+                displayMessage("System not ready. Please wait for initialization.");
+                return;
+            }
+
+            const newKey = generateKeyString();
+            
+            // Private Data Path: users/{userId}/apiKeys/activeKey
+            const docRef = doc(db, 'users', userId, 'apiKeys', 'activeKey');
+
+            try {
+                await setDoc(docRef, {
+                    key: newKey,
+                    rotatedAt: serverTimestamp(),
+                    status: 'active',
+                    appId: appId
+                });
+                displayMessage('New API Key generated and saved successfully!');
+            } catch (error) {
+                console.error("Error writing document:", error);
+                displayMessage(`Failed to save key: ${error.message}. Check your Firestore Rules!`);
+            }
+        }
+
+        function copyToClipboard(text) {
+            if (!text) return;
+            try {
+                const textarea = document.createElement('textarea');
+                textarea.value = text;
+                document.body.appendChild(textarea);
+                textarea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textarea);
+                displayMessage('Copied to clipboard!');
+            } catch (err) {
+                console.error('Could not copy text: ', err);
+                displayMessage('Failed to copy. Try selecting and copying manually.');
+            }
+        }
+
+        // --- UI Rendering ---
+
+        function renderKeyDisplay(currentKey) {
+            contentArea.innerHTML = ''; // Clear content area
+
+            // 1. User ID Display
+            const userIdHTML = `
+                <div class="bg-indigo-50 p-3 rounded-lg border border-indigo-200">
+                    <p class="text-xs font-medium text-indigo-700">
+                        Current **User ID** (Needed for Validation):
+                    </p>
+                    <div class="flex items-center space-x-2 mt-1">
+                        <span id="user-id-text" class="font-mono text-sm text-indigo-900 break-all">${userId}</span>
+                        <button id="copy-user-id" class="text-indigo-500 hover:text-indigo-700 transition" title="Copy User ID">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v2M8 7h12M18 9v10a2 2 0 01-2 2H6a2 2 0 01-2-2V7a2 2 0 012-2h2" />
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+            `;
+            contentArea.insertAdjacentHTML('beforeend', userIdHTML);
+            document.getElementById('copy-user-id').addEventListener('click', () => copyToClipboard(userId));
+
+
+            // 2. Key Management Display
+            if (!currentKey) {
+                const noKeyHTML = `
+                    <div class="text-center p-6 border-2 border-dashed border-gray-300 rounded-xl bg-gray-50">
+                        <p class="text-lg text-gray-600 mb-4">No active API Key found.</p>
+                        <button id="generate-first-key" class="bg-indigo-600 text-white px-6 py-3 rounded-full font-semibold shadow-lg hover:bg-indigo-700 transition duration-150">
+                            Generate First API Key
+                        </button>
+                    </div>
+                `;
+                contentArea.insertAdjacentHTML('beforeend', noKeyHTML);
+                document.getElementById('generate-first-key').addEventListener('click', generateAndSaveKey);
+
+            } else {
+                // Ensure rotatedAt is handled correctly for display (it can be null on first save if serverTimestamp hasn't resolved)
+                const { key, rotatedAt } = currentKey;
+                const date = rotatedAt && rotatedAt.seconds ? new Date(rotatedAt.seconds * 1000).toLocaleString() : 'Pending / N/A';
+
+                const keyHTML = `
+                    <div class="space-y-4">
+                        <label class="block text-sm font-medium text-gray-700">Your Active API Key:</label>
+                        <div class="flex items-stretch rounded-xl shadow-md overflow-hidden">
+                            <input
+                                type="text"
+                                readonly
+                                value="${key}"
+                                id="api-key-input"
+                                class="flex-grow p-4 bg-gray-100 text-gray-800 font-mono text-lg truncate border border-gray-300"
+                            />
+                            <button id="copy-api-key" class="bg-indigo-500 text-white px-4 hover:bg-indigo-600 transition duration-150 flex items-center" title="Copy Key">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v2M8 7h12M18 9v10a2 2 0 01-2 2H6a2 2 0 01-2-2V7a2 2 0 012-2h2" />
+                                </svg>
+                            </button>
+                        </div>
+
+                        <p class="text-sm text-gray-500 pt-2">
+                            Last Rotated: <span class="font-semibold text-gray-700">${date}</span>
+                        </p>
+
+                        <button id="rotate-key" class="w-full mt-4 bg-red-500 text-white px-4 py-2 rounded-full font-semibold shadow-lg hover:bg-red-600 transition duration-150 flex items-center justify-center space-x-2">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                <path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.564 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H8a1 1 0 010 2H4a1 1 0 01-1-1V4a1 1 0 011-1zM16 17a1 1 0 001-1v-2.101a7.002 7.002 0 00-11.601-2.564 1 1 0 001.885-.666A5.002 5.002 0 0114.001 13H12a1 1 0 100 2h4a1 1 0 001-1z" clip-rule="evenodd" />
+                            </svg>
+                            <span>Rotate Key (Generate New)</span>
+                        </button>
+                    </div>
+                `;
+                contentArea.insertAdjacentHTML('beforeend', keyHTML);
+
+                // Add event listeners
+                document.getElementById('copy-api-key').addEventListener('click', () => copyToClipboard(key));
+                document.getElementById('rotate-key').addEventListener('click', generateAndSaveKey);
+            }
+        }
+
+        // --- Initialization and Listener ---
+
+        window.onload = function() {
+            // Check for placeholder API Key immediately
+            if (firebaseConfig.apiKey === "YOUR_API_KEY") {
+                contentArea.innerHTML = `
+                    <div class="p-4 rounded-xl config-error border-2 border-dashed">
+                        <p class="text-xl mb-2">🛑 CONFIGURATION REQUIRED 🛑</p>
+                        <p class="text-sm">
+                            Please update the <code>apiKey</code> in the <code>firebaseConfig</code> object 
+                            in the code editor to your **actual Firebase Web API Key**. 
+                            Authentication cannot proceed without it.
+                        </p>
+                    </div>
+                `;
+                console.error("Firebase Error: The API Key is still set to the placeholder value 'YOUR_API_KEY'. Please replace it with your actual key.");
+                return; // Stop execution if config is incomplete
+            }
+
+            try {
+                // Initialize Firebase
+                app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+                
+                // Optional: setLogLevel('Debug'); to see detailed logs in console
+
+                // Handle Authentication
+                const handleSignIn = async () => {
+                    try {
+                        // Use the provided __initial_auth_token if available
+                        if (typeof __initial_auth_token !== 'undefined') {
+                            await signInWithCustomToken(auth, __initial_auth_token);
+                        } else {
+                            // Fallback to anonymous sign-in if no token is available
+                            await signInAnonymously(auth);
+                        }
+                    } catch (error) {
+                        console.error("Authentication Error:", error);
+                        // The error message clearly states the API key is the issue.
+                        displayMessage(`Failed to sign in. Error: ${error.message}. Please **double-check your Firebase API Key**.`);
+                    }
+                };
+                
+                handleSignIn();
+
+                // Set up Auth State Listener
+                onAuthStateChanged(auth, (user) => {
+                    if (user) {
+                        userId = user.uid;
+                    } else {
+                        // If no user (shouldn't happen with anonymous sign-in, but safe guard)
+                        userId = generateSimpleUUID();
+                    }
+                    isAuthReady = true;
+
+                    // Once Auth is Ready, set up Firestore listener
+                    if (isAuthReady && userId) {
+                        // Reference to the specific document for this user's key
+                        const docRef = doc(db, 'users', userId, 'apiKeys', 'activeKey');
+                        
+                        // Real-time listener for the document
+                        onSnapshot(docRef, (docSnap) => {
+                            if (docSnap.exists()) {
+                                renderKeyDisplay(docSnap.data());
+                            } else {
+                                renderKeyDisplay(null);
+                            }
+                        }, (error) => {
+                            console.error("Firestore Snapshot Error:", error);
+                            displayMessage("Could not load data. Check Firebase permissions (Rules tab).");
+                            renderKeyDisplay(null); // Show the UI even if loading failed
+                        });
+                    }
+                });
+
+            } catch (error) {
+                console.error("Initialization failed:", error);
+                displayMessage(`Fatal Error: ${error.message}. Check your entire Firebase Config in the file.`);
+            }
+        };
+
+    </script>
+</body>
+</html>
