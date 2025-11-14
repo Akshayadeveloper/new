@@ -4,87 +4,128 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>API Key Manager (HTML/JS)</title>
+    <title>Firebase API Tester</title>
     <!-- Load Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        /* Define Inter font family */
+        /* Define Inter font family and base styling */
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
-        body {
-            font-family: 'Inter', sans-serif;
-        }
-        /* Custom alert styling for configuration error */
+        body { font-family: 'Inter', sans-serif; }
         .config-error {
-            background-color: #fee2e2; /* Red-100 */
-            border-color: #ef4444; /* Red-500 */
-            color: #b91c1c; /* Red-800 */
-            font-weight: bold;
-            text-align: center;
+            background-color: #fef2f2; border-color: #f87171; color: #b91c1c;
+            font-weight: bold; text-align: center;
         }
     </style>
 </head>
 <body class="min-h-screen bg-gray-100 p-4 sm:p-8">
 
-    <div id="app" class="w-full max-w-lg mx-auto bg-white p-6 sm:p-8 rounded-2xl shadow-2xl border-t-4 border-indigo-500 space-y-6">
-        <h1 class="text-3xl font-extrabold text-gray-900 text-center">API Key Manager</h1>
-        <p class="text-sm text-center text-gray-500">Securely manage your client application API key via Firestore.</p>
+    <div id="app" class="w-full max-w-2xl mx-auto bg-white p-6 sm:p-10 rounded-2xl shadow-2xl border-t-4 border-indigo-500 space-y-8">
+        <h1 class="text-3xl font-extrabold text-gray-900 text-center">Firebase Connection Tester</h1>
+        <p class="text-sm text-center text-gray-500">Tests successful authentication and Firestore read/write capabilities.</p>
 
-        <!-- Dynamic Content Area -->
-        <div id="content-area">
-            <div class="flex justify-center items-center h-48">
-                <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-500"></div>
-                <p class="ml-4 text-gray-600">Initializing Firebase...</p>
+        <!-- Configuration Status -->
+        <div id="config-status" class="p-3 rounded-lg text-sm transition-all duration-300"></div>
+
+        <!-- User Information -->
+        <div id="user-info" class="bg-indigo-50 p-4 rounded-xl border border-indigo-200">
+            <h2 class="text-xl font-semibold text-indigo-700 mb-2">User Status</h2>
+            <div id="user-status-text" class="text-gray-800">
+                Authenticating...
+            </div>
+        </div>
+
+        <!-- Data Interaction Section -->
+        <div id="data-section" class="space-y-4 hidden">
+            <h2 class="text-xl font-semibold text-gray-700">Firestore Data Test (Private Path)</h2>
+            <p class="text-sm text-gray-500">
+                Path: artifacts/<span id="app-id-display"></span>/users/<span id="user-id-display"></span>/test/data
+            </p>
+
+            <div class="flex space-x-4">
+                <button id="write-button" class="flex-1 bg-green-500 text-white px-4 py-2 rounded-lg font-semibold shadow-md hover:bg-green-600 transition">
+                    Write Test Data
+                </button>
+                <button id="read-button" class="flex-1 bg-blue-500 text-white px-4 py-2 rounded-lg font-semibold shadow-md hover:bg-blue-600 transition">
+                    Read Data Once
+                </button>
+            </div>
+
+            <div id="data-display" class="mt-4 p-4 bg-gray-50 rounded-lg border border-gray-200 min-h-[50px] font-mono text-sm whitespace-pre-wrap">
+                Click "Read Data Once" to load the stored content.
             </div>
         </div>
         
-        <!-- Status Message Box -->
-        <div id="message-box" class="hidden mt-4 p-3 bg-yellow-100 border border-yellow-400 text-yellow-800 rounded-lg text-sm transition-all duration-300"></div>
+        <!-- General Message Box -->
+        <div id="message-box" class="hidden p-3 rounded-lg text-sm"></div>
     </div>
 
     <!-- Firebase SDK Imports -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, setDoc, onSnapshot, serverTimestamp, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, doc, setDoc, getDoc, onSnapshot, serverTimestamp, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // =====================================================================
-        // 🚨 CRITICAL: REPLACE PLACEHOLDERS BELOW WITH YOUR ACTUAL FIREBASE CONFIG
+        // 🚨 CRITICAL: FALLBACK CONFIGURATION (Required for local/standalone testing)
+        // If the environment variables are NOT defined, you must replace the
+        // placeholders below with your actual project details.
         // =====================================================================
-        const firebaseConfig = {
-            // !!! THIS MUST BE YOUR ACTUAL API KEY !!!
-            apiKey: "YOUR_API_KEY", 
-            authDomain: "YOUR_AUTH_DOMAIN", 
-            projectId: "YOUR_PROJECT_ID", 
-            storageBucket: "YOUR_STORAGE_BUCKET",
-            messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
-            appId: "YOUR_APP_ID"
+        const hardcodedConfig = {
+            // !!! REPLACE THIS WITH YOUR ACTUAL WEB API KEY !!!
+            apiKey: "YOUR_WEB_API_KEY_HERE", 
+            authDomain: "YOUR_AUTH_DOMAIN_HERE", 
+            projectId: "YOUR_PROJECT_ID_HERE", 
+            storageBucket: "YOUR_STORAGE_BUCKET_HERE",
+            messagingSenderId: "YOUR_MESSAGING_SENDER_ID_HERE",
+            appId: "YOUR_APP_ID_HERE"
         };
+        
+        // --- Core Setup Variables ---
+        // 1. Configuration: Use environment variable, otherwise use fallback config.
+        const firebaseConfig = typeof __firebase_config !== 'undefined' 
+            ? JSON.parse(__firebase_config) 
+            : hardcodedConfig;
+
+        // 2. App ID: Use environment variable, otherwise use project ID.
+        const appId = typeof __app_id !== 'undefined' ? __app_id : firebaseConfig.projectId || 'default-app-id';
+        
+        // 3. Auth Token: Use environment variable, otherwise null.
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
         // =====================================================================
 
-        // Initialize Global Variables
+        // Initialize Global Firebase Instances
         let app;
         let db;
         let auth;
         let userId = null;
         let isAuthReady = false;
 
-        // Global variable definitions (or mock for local running)
-        // Note: We use the provided __app_id first, then fallback to config.projectId, then a default.
-        const appId = typeof __app_id !== 'undefined' ? __app_id : firebaseConfig.projectId || 'default-app-id';
-
+        // DOM Elements
+        const configStatus = document.getElementById('config-status');
+        const userInfoText = document.getElementById('user-status-text');
+        const dataSection = document.getElementById('data-section');
+        const writeButton = document.getElementById('write-button');
+        const readButton = document.getElementById('read-button');
+        const dataDisplay = document.getElementById('data-display');
         const messageBox = document.getElementById('message-box');
-        const contentArea = document.getElementById('content-area');
+        const appIdDisplay = document.getElementById('app-id-display');
+        const userIdDisplay = document.getElementById('user-id-display');
 
         // --- Utility Functions ---
 
-        // Display status messages to the user
-        function displayMessage(msg) {
+        // Display status messages
+        function displayMessage(msg, type = 'info') {
             messageBox.textContent = msg;
+            messageBox.classList.remove('hidden', 'bg-red-100', 'border-red-400', 'text-red-800', 'bg-green-100', 'border-green-400', 'text-green-800', 'bg-yellow-100', 'border-yellow-400', 'text-yellow-800');
+            
+            if (type === 'error') {
+                messageBox.classList.add('bg-red-100', 'border-red-400', 'text-red-800');
+            } else if (type === 'success') {
+                messageBox.classList.add('bg-green-100', 'border-green-400', 'text-green-800');
+            } else {
+                messageBox.classList.add('bg-yellow-100', 'border-yellow-400', 'text-yellow-800');
+            }
             messageBox.classList.remove('hidden');
-            setTimeout(() => {
-                messageBox.classList.add('hidden');
-                messageBox.textContent = '';
-            }, 5000); // Hide message after 5 seconds
         }
 
         // Helper function to generate a simple UUID
@@ -97,215 +138,184 @@
             });
             return uuid;
         }
-
-        // Function to generate a new key string
-        function generateKeyString() {
-            const randomSuffix = generateSimpleUUID().replace(/-/g, '').substring(0, 20).toUpperCase();
-            return `FL-PRO-${randomSuffix}`;
-        }
         
-        // Function to save the new key to Firestore
-        async function generateAndSaveKey() {
-            if (!db || !userId) {
-                displayMessage("System not ready. Please wait for initialization.");
+        // Function to create the Firestore document reference path
+        function getTestDocRef() {
+            // Private data path: /artifacts/{appId}/users/{userId}/test/data
+            return doc(db, 'artifacts', appId, 'users', userId, 'test', 'data');
+        }
+
+        // --- Firebase Core Functions ---
+
+        async function handleSignIn() {
+            try {
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                    userInfoText.innerHTML = `Signed in successfully (Custom Token). Waiting for state change...`;
+                } else {
+                    await signInAnonymously(auth);
+                    userInfoText.innerHTML = `Signed in successfully (Anonymous). Waiting for state change...`;
+                }
+            } catch (error) {
+                console.error("Authentication Error:", error);
+                userInfoText.innerHTML = `<span class="text-red-600 font-bold">Authentication Failed:</span> ${error.message}.`;
+                dataSection.classList.add('hidden');
+                
+                // CRITICAL: Display specific error message for the API key problem
+                if (error.message.includes('api-key-not-valid')) {
+                    configStatus.innerHTML = `<div class="p-4 rounded-xl config-error border-2 border-dashed">
+                        <p class="text-xl mb-2">🛑 CONFIGURATION ERROR: Invalid API Key 🛑</p>
+                        <p class="text-sm">
+                            The Web API Key used is incorrect. If you are running this locally, you **must** update the 
+                            <code class="font-mono bg-red-200 px-1 rounded">apiKey</code> in the <code class="font-mono bg-red-200 px-1 rounded">hardcodedConfig</code> 
+                            object with your **actual Firebase Web API Key**.
+                        </p>
+                    </div>`;
+                } else {
+                    displayMessage(`Fatal Authentication Error: ${error.message}`, 'error');
+                }
+            }
+        }
+
+        function setupAuthStateListener() {
+            onAuthStateChanged(auth, (user) => {
+                if (user) {
+                    userId = user.uid;
+                    isAuthReady = true;
+                    userInfoText.innerHTML = `<span class="font-semibold text-green-600">Authenticated:</span> User ID: <code class="font-mono">${userId}</code>`;
+                    appIdDisplay.textContent = appId;
+                    userIdDisplay.textContent = userId;
+                    dataSection.classList.remove('hidden');
+                    // Automatically set up real-time listener after auth
+                    setupRealtimeListener();
+                } else {
+                    // Fallback to a unique ID if auth fails for some reason
+                    userId = generateSimpleUUID();
+                    isAuthReady = false;
+                    userInfoText.innerHTML = `<span class="font-semibold text-red-600">Unauthenticated:</span> Using temporary ID <code class="font-mono">${userId}</code>`;
+                    dataSection.classList.add('hidden');
+                }
+            });
+        }
+
+        function setupRealtimeListener() {
+            if (!isAuthReady) return;
+            const docRef = getTestDocRef();
+
+            // Set up real-time listener
+            onSnapshot(docRef, (docSnap) => {
+                const now = new Date().toLocaleTimeString();
+                if (docSnap.exists()) {
+                    const data = docSnap.data();
+                    let displayContent = JSON.stringify(data, null, 2);
+                    dataDisplay.textContent = `[Updated @ ${now}]\n\n` + displayContent;
+                    displayMessage('Real-time data update received!', 'info');
+                } else {
+                    dataDisplay.textContent = `[Updated @ ${now}]\n\nNo document found at path.`;
+                }
+            }, (error) => {
+                console.error("Firestore Listener Error:", error);
+                displayMessage(`Real-time Listener Failed. Check Firestore Rules. Error: ${error.message}`, 'error');
+                dataDisplay.textContent = `ERROR: Failed to listen for data. Check console.`;
+            });
+        }
+
+        // --- Data Interaction Handlers ---
+
+        async function writeTestData() {
+            if (!isAuthReady) {
+                displayMessage('Authentication not ready. Please wait.', 'error');
                 return;
             }
 
-            const newKey = generateKeyString();
-            
-            // Private Data Path: users/{userId}/apiKeys/activeKey
-            const docRef = doc(db, 'users', userId, 'apiKeys', 'activeKey');
+            const docRef = getTestDocRef();
+            const payload = {
+                message: `Test message written by user ${userId} at ${new Date().toISOString()}`,
+                userId: userId,
+                timestamp: serverTimestamp(),
+                testValue: Math.floor(Math.random() * 100)
+            };
 
             try {
-                await setDoc(docRef, {
-                    key: newKey,
-                    rotatedAt: serverTimestamp(),
-                    status: 'active',
-                    appId: appId
-                });
-                displayMessage('New API Key generated and saved successfully!');
+                await setDoc(docRef, payload);
+                displayMessage('Test data successfully written!', 'success');
             } catch (error) {
-                console.error("Error writing document:", error);
-                displayMessage(`Failed to save key: ${error.message}. Check your Firestore Rules!`);
+                console.error("Write Error:", error);
+                displayMessage(`Failed to write data. Check Firestore Rules. Error: ${error.message}`, 'error');
             }
         }
 
-        function copyToClipboard(text) {
-            if (!text) return;
+        async function readDataOnce() {
+            if (!isAuthReady) {
+                displayMessage('Authentication not ready. Please wait.', 'error');
+                return;
+            }
+
+            const docRef = getTestDocRef();
+
             try {
-                const textarea = document.createElement('textarea');
-                textarea.value = text;
-                document.body.appendChild(textarea);
-                textarea.select();
-                document.execCommand('copy');
-                document.body.removeChild(textarea);
-                displayMessage('Copied to clipboard!');
-            } catch (err) {
-                console.error('Could not copy text: ', err);
-                displayMessage('Failed to copy. Try selecting and copying manually.');
+                const docSnap = await getDoc(docRef);
+                const now = new Date().toLocaleTimeString();
+                if (docSnap.exists()) {
+                    const data = docSnap.data();
+                    dataDisplay.textContent = `[One-time Read @ ${now}]\n\n` + JSON.stringify(data, null, 2);
+                    displayMessage('One-time read successful!', 'success');
+                } else {
+                    dataDisplay.textContent = `[One-time Read @ ${now}]\n\nDocument does not exist.`;
+                    displayMessage('Document not found.', 'info');
+                }
+            } catch (error) {
+                console.error("Read Error:", error);
+                displayMessage(`Failed to read data. Check Firestore Rules. Error: ${error.message}`, 'error');
             }
         }
 
-        // --- UI Rendering ---
-
-        function renderKeyDisplay(currentKey) {
-            contentArea.innerHTML = ''; // Clear content area
-
-            // 1. User ID Display
-            const userIdHTML = `
-                <div class="bg-indigo-50 p-3 rounded-lg border border-indigo-200">
-                    <p class="text-xs font-medium text-indigo-700">
-                        Current **User ID** (Needed for Validation):
-                    </p>
-                    <div class="flex items-center space-x-2 mt-1">
-                        <span id="user-id-text" class="font-mono text-sm text-indigo-900 break-all">${userId}</span>
-                        <button id="copy-user-id" class="text-indigo-500 hover:text-indigo-700 transition" title="Copy User ID">
-                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                                <path stroke-linecap="round" stroke-linejoin="round" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v2M8 7h12M18 9v10a2 2 0 01-2 2H6a2 2 0 01-2-2V7a2 2 0 012-2h2" />
-                            </svg>
-                        </button>
-                    </div>
-                </div>
-            `;
-            contentArea.insertAdjacentHTML('beforeend', userIdHTML);
-            document.getElementById('copy-user-id').addEventListener('click', () => copyToClipboard(userId));
-
-
-            // 2. Key Management Display
-            if (!currentKey) {
-                const noKeyHTML = `
-                    <div class="text-center p-6 border-2 border-dashed border-gray-300 rounded-xl bg-gray-50">
-                        <p class="text-lg text-gray-600 mb-4">No active API Key found.</p>
-                        <button id="generate-first-key" class="bg-indigo-600 text-white px-6 py-3 rounded-full font-semibold shadow-lg hover:bg-indigo-700 transition duration-150">
-                            Generate First API Key
-                        </button>
-                    </div>
-                `;
-                contentArea.insertAdjacentHTML('beforeend', noKeyHTML);
-                document.getElementById('generate-first-key').addEventListener('click', generateAndSaveKey);
-
-            } else {
-                // Ensure rotatedAt is handled correctly for display (it can be null on first save if serverTimestamp hasn't resolved)
-                const { key, rotatedAt } = currentKey;
-                const date = rotatedAt && rotatedAt.seconds ? new Date(rotatedAt.seconds * 1000).toLocaleString() : 'Pending / N/A';
-
-                const keyHTML = `
-                    <div class="space-y-4">
-                        <label class="block text-sm font-medium text-gray-700">Your Active API Key:</label>
-                        <div class="flex items-stretch rounded-xl shadow-md overflow-hidden">
-                            <input
-                                type="text"
-                                readonly
-                                value="${key}"
-                                id="api-key-input"
-                                class="flex-grow p-4 bg-gray-100 text-gray-800 font-mono text-lg truncate border border-gray-300"
-                            />
-                            <button id="copy-api-key" class="bg-indigo-500 text-white px-4 hover:bg-indigo-600 transition duration-150 flex items-center" title="Copy Key">
-                                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                                    <path stroke-linecap="round" stroke-linejoin="round" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v2M8 7h12M18 9v10a2 2 0 01-2 2H6a2 2 0 01-2-2V7a2 2 0 012-2h2" />
-                                </svg>
-                            </button>
-                        </div>
-
-                        <p class="text-sm text-gray-500 pt-2">
-                            Last Rotated: <span class="font-semibold text-gray-700">${date}</span>
-                        </p>
-
-                        <button id="rotate-key" class="w-full mt-4 bg-red-500 text-white px-4 py-2 rounded-full font-semibold shadow-lg hover:bg-red-600 transition duration-150 flex items-center justify-center space-x-2">
-                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                                <path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.564 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H8a1 1 0 010 2H4a1 1 0 01-1-1V4a1 1 0 011-1zM16 17a1 1 0 001-1v-2.101a7.002 7.002 0 00-11.601-2.564 1 1 0 001.885-.666A5.002 5.002 0 0114.001 13H12a1 1 0 100 2h4a1 1 0 001-1z" clip-rule="evenodd" />
-                            </svg>
-                            <span>Rotate Key (Generate New)</span>
-                        </button>
-                    </div>
-                `;
-                contentArea.insertAdjacentHTML('beforeend', keyHTML);
-
-                // Add event listeners
-                document.getElementById('copy-api-key').addEventListener('click', () => copyToClipboard(key));
-                document.getElementById('rotate-key').addEventListener('click', generateAndSaveKey);
-            }
-        }
-
-        // --- Initialization and Listener ---
+        // --- Main Initialization ---
 
         window.onload = function() {
-            // Check for placeholder API Key immediately
-            if (firebaseConfig.apiKey === "YOUR_API_KEY") {
-                contentArea.innerHTML = `
-                    <div class="p-4 rounded-xl config-error border-2 border-dashed">
-                        <p class="text-xl mb-2">🛑 CONFIGURATION REQUIRED 🛑</p>
-                        <p class="text-sm">
-                            Please update the <code>apiKey</code> in the <code>firebaseConfig</code> object 
-                            in the code editor to your **actual Firebase Web API Key**. 
-                            Authentication cannot proceed without it.
-                        </p>
-                    </div>
-                `;
-                console.error("Firebase Error: The API Key is still set to the placeholder value 'YOUR_API_KEY'. Please replace it with your actual key.");
-                return; // Stop execution if config is incomplete
+            // Final check for placeholders if running outside the canvas
+            if (typeof __firebase_config === 'undefined' && firebaseConfig.apiKey === "YOUR_WEB_API_KEY_HERE") {
+                configStatus.innerHTML = `<div class="p-4 rounded-xl config-error border-2 border-dashed">
+                    <p class="text-xl mb-2">🛑 CONFIGURATION REQUIRED 🛑</p>
+                    <p class="text-sm">
+                        Please update the **apiKey** in the **hardcodedConfig** object 
+                        to your actual Firebase Web API Key to test locally.
+                    </p>
+                </div>`;
+                userInfoText.innerHTML = `<span class="text-red-600 font-bold">Initialization Stopped.</span> Check configuration.`;
+                return;
             }
 
             try {
-                // Initialize Firebase
+                // Initialize Firebase services
                 app = initializeApp(firebaseConfig);
                 db = getFirestore(app);
                 auth = getAuth(app);
                 
-                // Optional: setLogLevel('Debug'); to see detailed logs in console
+                // Set debug logging to capture any issues
+                setLogLevel('Debug'); 
 
-                // Handle Authentication
-                const handleSignIn = async () => {
-                    try {
-                        // Use the provided __initial_auth_token if available
-                        if (typeof __initial_auth_token !== 'undefined') {
-                            await signInWithCustomToken(auth, __initial_auth_token);
-                        } else {
-                            // Fallback to anonymous sign-in if no token is available
-                            await signInAnonymously(auth);
-                        }
-                    } catch (error) {
-                        console.error("Authentication Error:", error);
-                        // The error message clearly states the API key is the issue.
-                        displayMessage(`Failed to sign in. Error: ${error.message}. Please **double-check your Firebase API Key**.`);
-                    }
-                };
-                
+                // Start the sign-in process and listen for state changes
                 handleSignIn();
+                setupAuthStateListener();
 
-                // Set up Auth State Listener
-                onAuthStateChanged(auth, (user) => {
-                    if (user) {
-                        userId = user.uid;
-                    } else {
-                        // If no user (shouldn't happen with anonymous sign-in, but safe guard)
-                        userId = generateSimpleUUID();
-                    }
-                    isAuthReady = true;
+                // Add event listeners to buttons
+                writeButton.addEventListener('click', writeTestData);
+                readButton.addEventListener('click', readDataOnce);
 
-                    // Once Auth is Ready, set up Firestore listener
-                    if (isAuthReady && userId) {
-                        // Reference to the specific document for this user's key
-                        const docRef = doc(db, 'users', userId, 'apiKeys', 'activeKey');
-                        
-                        // Real-time listener for the document
-                        onSnapshot(docRef, (docSnap) => {
-                            if (docSnap.exists()) {
-                                renderKeyDisplay(docSnap.data());
-                            } else {
-                                renderKeyDisplay(null);
-                            }
-                        }, (error) => {
-                            console.error("Firestore Snapshot Error:", error);
-                            displayMessage("Could not load data. Check Firebase permissions (Rules tab).");
-                            renderKeyDisplay(null); // Show the UI even if loading failed
-                        });
-                    }
-                });
+                configStatus.innerHTML = `<div class="p-3 bg-green-100 border border-green-400 text-green-800 rounded-lg">
+                    <span class="font-semibold">Config Success:</span> Firebase loaded using ${typeof __firebase_config !== 'undefined' ? 'Environment Variables' : 'Hardcoded Fallback'}.
+                </div>`;
 
             } catch (error) {
-                console.error("Initialization failed:", error);
-                displayMessage(`Fatal Error: ${error.message}. Check your entire Firebase Config in the file.`);
+                console.error("Initialization Failed:", error);
+                displayMessage(`Initialization Failed: ${error.message}`, 'error');
+                configStatus.innerHTML = `<div class="p-4 rounded-xl config-error border-2 border-dashed">
+                    <p class="text-xl mb-2">❌ INITIALIZATION FAILURE ❌</p>
+                    <p class="text-sm">
+                        A critical error occurred while initializing Firebase. Check the console for details and ensure your config object is fully complete and correct.
+                    </p>
+                </div>`;
             }
         };
 
